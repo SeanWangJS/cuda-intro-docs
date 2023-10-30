@@ -8,5 +8,5 @@
 04_cuda_dev_env/04_cuda_dev_env.md
 05_parallel_primitive/05_parallel_primitive.md
 06_timing_and_performance/06_timing_and_performance.md
-07_parallel_reduce/07_parallel_reduce.md
+07_parallel_reduce/parallel_reduce.md
 ```

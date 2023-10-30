@@ -42,10 +42,10 @@ CUDA 是建立在英伟达GPU硬件架构之上的并行计算平台和编程模
 
 显存带宽是 GPU 的一项重要性能指标，它反映了 SM 在计算的过程中从显存中读写数据的速度，单位是 (GB/s)。显然，由于在 SM 中还存在运算指令执行过程，所以实际的程序利用的有效带宽并不能完全达到显存带宽提供的理论上限。了解显存带宽的指导意义在于，可以帮助我们评估算法的硬件利用率，如果利用率太低，那么就需要考虑如何优化算法，从而提高性能。
 
-与显存相关的指标还有位宽（bus width），频率（clock rate）等，它们与带宽的关系[4]如下：
+与显存相关的指标还有位宽（bus width），内存频率（clock rate）等，它们与带宽的关系[4]如下：
 
 $$
-BandWidth = 2 \times ClockRate \times (BusWidth / 8)
+BandWidth = 2 \times MemClockRate \times (BusWidth / 8)
 $$
 
 以 A100 40G GPU 为例，它的显存位宽为 5120 bit，频率为 1215 MHz，那么它的显存带宽就是
@@ -54,9 +54,27 @@ $$
 BandWidth = 2 \times (1215MHz \times 10^{-3} GHz/MHz)  \times (5120 bit / (8bit/Byte)) = 1555 GB/s
 $$
 
-## 计算性能指标
+## 算力 (Performance)
 
+GPU 的算力是指其在单位时间内能够完成的浮点运算次数，常用单位有 FLOPS，GFLOPS，TFLOPS，分别表示 float operation per second，giga float operation per second，tera float operation per second。
 
+由于 GPU 的计算核心被分成了多个数据类型，且每个数据类型的核心数量可能不同，所以 GPU 针对不同数据类型的算力也有可能是不同的。总的来说，GPU 的理论峰值算力计算公式为
+
+$$
+PeakPerf = 2 \times CUDACores \times BoostClockRate
+$$
+
+其中 $CUDACores$ 是特定数据类型的 CUDA 核心数量，$BoostClockRate$ 表示 GPU 的 Boost 频率。之所以这里还乘以 2，是因为每个 CUDA 核心在每个时钟周期可以执行一次 FMA 操作，而每个 FMA 操作包含一次乘法和一次加法，因此每个 CUDA 核心每个时钟周期可以执行两次浮点运算。
+
+以 A100 为例，它每个 SM 的 FP32 CUDA 核心数量为 64，总的 SM 数量为 108，Boost 频率为 1410 MHz，那么它的理论 FP32 峰值算力就是
+
+$$
+PeakPerf_{fp32} = 2 \times 64 \times 108 \times 1.410GHz = 19.5 TFLOPS
+$$
+
+这与官方公布的文档[5]中的数据是一致的。
+
+## 参考
 
 [1] Wen-mei W. Hwu, David B. Kirk, Izzat El Hajj. Programming massively parallel processors: a hands-on approach[M]. Morgan kaufmann, 2022
 
@@ -65,6 +83,8 @@ $$
 [3] [CUDA Memory and Cache Architecture](http://supercomputingblog.com/cuda/cuda-memory-and-cache-architecture/)
 
 [4] [How to Implement Performance Metrics in CUDA C/C++](https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/)
+
+[5] [NVIDIA A100 Tensor Core GPU Architecture](https://images.nvidia.com/aem-dam/en-zz/Solutions/data-center/nvidia-ampere-architecture-whitepaper.pdf)
 
 * https://www.nvidia.cn/content/dam/en-zz/zh_cn/Solutions/Data-Center/volta-gpu-architecture/Volta-Architecture-Whitepaper-v1.1-CN.compressed.pdf
 
