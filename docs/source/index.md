@@ -6,7 +6,6 @@
 02_cuda_programming_model/02_cuda_programming_model.md
 03_example_vector_add/03_example_vector_add.md
 04_cuda_dev_env/04_cuda_dev_env.md
-05_parallel_primitive/05_parallel_primitive.md
-06_timing_and_performance/06_timing_and_performance.md
-07_parallel_reduce/parallel_reduce.md
+05_timing_and_performance/timing_and_performance.md
+06_shared_memory/shared_memory.md
 ```
