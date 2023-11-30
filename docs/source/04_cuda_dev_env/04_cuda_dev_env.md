@@ -1,5 +1,7 @@
 # CUDA 编程入门（4）：搭建 CUDA 开发环境
 
+## 项目结构
+
 上一篇我们写了一个简单的小程序，使用一条命令就可以编译通过，但实际的项目结构要复杂得多，因此在本篇文章中，我们先介绍如何使用 VSCode 搭建一个 CMake 工程来进行 CUDA 开发，并集成 googletest 框架来做测试。
 
 首先，我们的项目结构如下
@@ -37,6 +39,8 @@
     "version": 4
 }
 ```
+
+## 编写 CMakeLists.txt
 
 主文件夹下的 CMakeLists.txt 内容如下
 
@@ -83,6 +87,8 @@ target_link_libraries(test_vector_add ${GTEST_LIBRARIES} vector_add)
 
 这里我们通过 `find_package(GTest REQUIRED)` 来查找 googletest 框架，使用 `add_executable` 将 test.cpp 添加为可执行文件，然后通过 `target_include_directories` 将 googletest 的头文件和本项目的头文件添加到工程中，通过 `target_link_libraries` 将 googletest 的库文件链接到 test_vector_add 可执行文件中。
 
+## 编译过程
+
 以上就是整个项目的 CMake 配置，其他代码这里就不赘述了，完整的项目可以在 [GitLab](https://gitlab.com/cuda_exercise/vector-add) 找到。下面我们给出 CMake 的编译过程
 
 ```shell
@@ -100,4 +106,8 @@ cmake --build .
 ...error LNK2038: mismatch detected for ‘RuntimeLibrary’: value ‘MTd_StaticDebug’ doesn't match value ‘MDd_DynamicDebug’ in...
 ```
 
-为此，官方的解决方案是在编译 googletest 框架时，在 CMake 命令中添加参数 `-Dgtest_force_shared_crt=ON`。
+为此，官方的解决方案是在编译 googletest 框架时，在 CMake 命令中添加参数 `-Dgtest_force_shared_crt=ON`[1]。
+
+## 参考
+
+[1] 详细内容见 [googletest README](https://github.com/google/googletest/blob/main/googletest/README.md#visual-studio-dynamic-vs-static-runtimes)

@@ -76,7 +76,7 @@ $$
 
 ## 参考
 
-[1] Wen-mei W. Hwu, David B. Kirk, Izzat El Hajj. Programming massively parallel processors: a hands-on approach[M]. Morgan kaufmann, 2022
+[1] 这两张图来源于 PMPP 这本书 4.4 节关于 SIMD 硬件的讨论。
 
 [2] [NVIDIA Ampere Architecture In-Depth](https://developer.nvidia.com/blog/nvidia-ampere-architecture-in-depth/)
 

@@ -1,29 +1,45 @@
-# CUDA 编程入门（7）：并行 Reduce 及其优化
+# CUDA 编程入门（7）：并行 Reduction 及其 kernel 优化技术
 
-> 本文基于 Mark Harris 的 Reduction PPT[1]编写
+> 本文受 Mark Harris 的 Reduction PPT[0] 启发编写
 
-以数组求和为例，在序列式算法下，元素需要一个一个地被加起来，如果有 `N` 个元素，就需要顺序的执行 `N-1` 次加法。而在多核心条件下，我们需要结合 CUDA 的特性来设计算法以达成最佳的性能表现。
+CUDA 编程涉及到许多概念，包括 GPU 硬件相关的，CUDA 编程模型相关的，以及并行计算理论相关的，如果能够对这些概念有充分的理解并加以应用，那么就有可能写出更高性能的 CUDA 程序。本文以经典的 Reduction 算子——数组求和——为例，逐步介绍一些常见的 kernel 优化技术，并展示这些技术是如何提升 CUDA 程序的性能的。
 
 ## Roofline 模型分析
 
-在正式编写代码实现某个算法之前，我们可以先分析该算法在指定硬件上的 Roofline 模型，从而对该算法的极限性能有个大致的预期。对于单精度数组求和这个任务来说，假设其元素数量等于 `n`，则运算量为 `n-1` 次加法，内存读取比特数为 `4n`，因此算术强度大约为 0.25。这里我以 RTX 4050 Mobile 笔记本作为测试平台进行分析，首先可以查到它的峰值 FP32 算力为 8.986 TFLOPS，显存带宽为 192 GB/s[2]，因此可以绘制出它的 Roofline 模型如下
+在正式编写代码实现某个算法之前，我们可以先分析该算法在指定硬件上的 Roofline 模型，从而对该算法的极限性能有个大致的预期。对于单精度数组求和这个任务来说，假设其元素数量等于 `n`，则运算量为 `n-1` 次加法，内存读取比特数为 `4n`，因此算术强度大约为 0.25。这里我以 RTX 4050 Mobile 笔记本作为测试平台进行分析，首先可以查到它的峰值 FP32 算力为 8.986 TFLOPS，显存带宽为 192 GB/s[1]，因此可以绘制出它的 Roofline 模型如下
  
 ![](./rtx4050_roofline.png)
+图 0. Reduce 算子在 RTX 4050 上的 Roofline 模型
 
-这里的 46.80 来自于 $8986 / 192$。其中黑点标明的位置就是 reduce 操作在当前 GPU 上的性能峰值，也就是 100% 利用显存带宽的情况下能够达到的运算吞吐量，大约为 48 GFLOPS。
+这里的 46.80 来自于 $8986 / 192$。其中黑点标明的位置就是 Reduction 操作在当前 GPU 上的性能峰值，也就是 100% 利用显存带宽的情况下能够达到的运算吞吐量，大约为 48 GFLOPS。
 
-## 基础实现版本
+## 原子操作
 
-首先考虑在无限多核心情况下，我们应该怎样组织计算资源。显然，与 Map 操作不同，Reduce 无法在 $\mathcal{O}(1)$ 的时间复杂度下完成操作，假设变量 `s` 为最终我们需要求得的数组和，如果采用多核心同时向 `s` 加上一个元素，则会产生大量的数据竞争，得到的结果肯定是不正确的。而为了正确的运行，我们需要对每次加法操作进行同步，也就是说，让每个计算核心争夺 `s` 的锁，完成运算之后再释放锁，这样一来，每个核心都能得到正确的结果，但是这种方式的时间复杂度就变成了 $\mathcal{O}(N)$，与序列式算法相同。
+假设我们要计算 `N` 个元素的和，最直接的想法是声明一个全局变量，让每个 thread 从数组中取一个元素加到这个变量上，最终得到求和结果。当然，为了避免数据竞争问题，我们使用 CUDA 提供的 `atomicAdd` 方法，确保每次运算都是原子操作。具体实现如下
 
-为了避免每次加法都需要同步，我们可以采用一种树形结构的规约模式[3]，如下图所示
+```cpp
+template <typename T>
+__global__ void reduce_kernel_0(const T* data, const size_t n, T* result) {
+
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if(tid >= n) return;
+
+    atomicAdd(&result[0], data[tid]);
+}
+```
+
+atomicAdd 虽然避免了数据竞争问题，但是每次计算相当于对全局变量加锁，理论上的时间复杂度和串行方法相同，因此效率不高[2]。
+
+## 树形规约模式
+
+为了充分利用 GPU 的多核心优势，可以采用分块计算的思路，即在逻辑上把数据分为两个块，分别计算每个块的和，最后在求总和。而在每个块内部，采用同样的思路递归的分块，最终可以得到如下的一个计算图[3]
 
 ![](./tree_reduce.png)
 图1：树形规约模式
 
 上图中的每个 stage，绿色的方框是参与运算的元素，可以看到，每个 stage 中，每个核心负责对相邻的两个元素求和，此时不需要任何同步，因为这里不需要一个全局的变量来存储求和结果。而每个 stage 之间需要同步操作，以确保当前 stage 的所有核心完成计算才进入下一个 stage，最终所有元素都被归约到了第一个元素位置上，这个元素就是我们需要的求和结果。
 
-现在回到 CUDA 中来，此时每个 thread 就是一个计算核心，我们可以将数组中的元素分配到 thread 上进行计算。考虑到每个 block 上的 thread 数量是有限的，因此对于较大型的数组我们还需要声明多个 block。于是，使用 CUDA 来进行并行 Reduce 的思路就是：1. 在每个 block 内部进行规约，2. 对所有 block 的规约结果求和。根据以上描述，我们给出 kernel 代码如下
+现在回到 CUDA 中来，此时每个 thread 就是一个计算核心，我们可以将数组中的元素分配到 thread 上进行计算。考虑到每个 block 上的 thread 数量是有限的，因此对于较大型的数组我们还需要声明多个 block。于是，使用 CUDA 来进行并行 Reduction 的思路就是：1. 在每个 block 内部进行规约，2. 对所有 block 的规约结果求和。根据以上描述，可以给出 kernel 代码如下
 
 ```cpp
 template <typename T, int blockSize>
@@ -59,7 +75,7 @@ __global__ void reduce_kernel_1(const T* data, const size_t n, T* result) {
 5. 开始 stage 循环，以 `s` 作为循环变量，在每个 stage 中，只有能被 `2 * s` 整除的 thread 才会参与计算，比如，当 `s = 1` 时，只有 `tid = 0, 2, 4, 6, ...` 的 thread 参与计算，当 `s = 2` 时，只有 `tid = 0, 4, 8, 12, ...` 的 thread 参与计算，以此类推。参与计算的两个元素位置为 `tid` 和 `tid + s`，计算结果被赋予 `tid` 所在位置。在两次 stage 之间，需要调用 `__syncthreads()` 同步方法确保当前 stage 的所有元素完成计算。由于每个 stage 之后，`s` 都会翻倍，因此总的 stage 数量为 $\log_2(blockSize)$。
 5. 所有 stage 完成后，最终规约结果被保存在了 `sdata[0]`，因此只需要 thread #0 将 `sdata[0]` 的数据加到 result 的第一个位置即可，这里使用 `atomicAdd` 确保多个 block 不会发生冲突。
 
-这段 kernel 是跑在 GPU 上的，每个 thread 都会运行一遍，并且有大量 thread 是同时运行的。在 Host 端的代码如下
+这段 kernel 是跑在 GPU 上的，每个 thread 都会运行一遍，并且有大量 thread 是同时运行的。而在 Host 端的代码如下
 
 ```cpp
 #define BLOCK_SIZE 256
@@ -534,13 +550,15 @@ if (tid == 0) {
 
 ## 总结
 
-我们在这篇文章中，借用对 Reduce 并行算法的优化过程，展示了 CUDA 编程中常见的性能热点和优化技术概念，包括 Control Divergence，Bank Conflicts，Warp Shuffling，Thread Coarsening 等。通过对这些技术的合理应用，能够大幅提升 CUDA 程序的性能。
+我们在这篇文章中，借用对 Reduce 并行算法的优化过程，展示了 CUDA 编程中常见的性能热点和优化技术概念，包括 Control Divergence，Bank Conflicts，Warp Shuffling，Thread Coarsening 等。通过对这些技术的合理应用，能够大幅提升 CUDA 程序的性能。最后，我们在[gitlab]()上给出所有源码，感兴趣的同学可以参考。
 
 ## 参考
 
-[1] [Optimizing Parallel Reduction in CUDA](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf).
+[0] [Optimizing Parallel Reduction in CUDA](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf).
 
-[2] [NVIDIA GeForce RTX 4050 Mobile](https://www.techpowerup.com/gpu-specs/geforce-rtx-4050-mobile.c3953).
+[1] [NVIDIA GeForce RTX 4050 Mobile](https://www.techpowerup.com/gpu-specs/geforce-rtx-4050-mobile.c3953).
+
+[2] CUDA仍在不断发展，atmoic 系列方法在不同的硬件架构和数据类型上的表现也有所不同，根据我的实验，在 Ampere 架构上，使用 atomicAdd 对整型数组求和速度相当快，但是对浮点型仍然很慢。
 
 [3] 任何并行算法都可以被构造成一个有向无环图，图中同一层的节点可以并行计算，相互连接的节点之间存在依赖关系，需要先后计算，因此理论算法时间步等于计算图的深度，相关内容可以查看 [https://stanford.edu/~rezab/dao/notes/lecture01/cme323_lec1.pdf](https://stanford.edu/~rezab/dao/notes/lecture01/cme323_lec1.pdf).
 

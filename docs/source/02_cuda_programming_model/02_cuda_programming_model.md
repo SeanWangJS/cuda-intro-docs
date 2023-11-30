@@ -15,12 +15,13 @@ Thread 的物理执行单元就是流处理器(SP)，也就是说，每个 threa
 最后还需要提及的是在 thread 和 block 之间，有一个被称为**线程束** (warp) 的重要概念。每个 warp 由 32 个 thread 组成，它是 CUDA 中的最小调度单位，也就是说，每个 warp 中的 32 个 thread 会被同时调度到一个 SM 中的 32 个 SP 上执行，这种调度方式也被称为 SIMT (Single Instruction Multiple Thread)。
 
 ![](./02_compute_model_hierachy.png)
+* 图 1. CUDA 计算模型
 
 上图比较形象的展示了 grid，block 和 thread 的关系，其中 grid 和 block 都是具有三个维度的结构，通过坐标可以定位到具体的 block 和 thread。
 
 ## CUDA 内存模型
 
-从硬件层面来看，GPU的存储设备主要有寄存器文件，L1 缓存，L2 缓存和 HBM。而 CUDA 则把这些物理硬件抽象成了多种不同功能的逻辑内存。主要包括
+从硬件层面来看，GPU的存储设备主要有寄存器文件，L1 缓存，L2 缓存和GPU内存。而 CUDA 则把这些物理硬件抽象成了多种不同功能的逻辑内存。主要包括
 
 - 寄存器 (register)
 - 本地内存 (local memory)
@@ -30,9 +31,9 @@ Thread 的物理执行单元就是流处理器(SP)，也就是说，每个 threa
 
 其中，register 和 local memory 是 thread 私有的，shared memory 由 block 内的所有 thread 共享，global memory 和 constant memory 则是 grid 内全局可见。
 
-register 实际就位于 SM 的 register file，因此具有最高的读写速度，shared memory 是位于 SM 的片上内存，速度也相当快。
+register 实际就位于 SM 的 register file，因此具有最高的读写速度，shared memory 是位于 SM 的片上内存，按理说 shared memory 作为逻辑内存具有虚拟的地址空间，对应的物理硬件是 L1 缓存，但是在描述上，shared memory 常常和 L1 缓存并列，它们共享相同的硬件，且可以通过软件设置分配比例。
 
-而 global memory 则是映射到设备物理内存上的虚拟地址空间，相对于片上内存，具有较高的读写延迟，不过可以利用 SM 上的 L1 缓存和 GPU 的 L2 缓存来提高读写效率。
+而 global memory 则是映射到GPU内存上的虚拟地址空间，相对于片上内存，具有较高的读写延迟，不过可以利用  L1 和 L2 缓存来提高读写效率。
 
 local memory 用来存储 thread 的本地数据，比如数组，以及 register 溢出的变量。从存储空间来看，local memory 实际上是 global memory 的一部分，所以具有相同的延迟。
 
@@ -52,7 +53,7 @@ Block 对应的物理硬件概念是 SM，也就是说 SM 负责 block 中线程
 
 同一个 block 上的所有 thread 会被分配到同一个 SM 上执行，每个 block 都有一个共享内存区域，可以被其中的所有线程访问。block 中的线程通过 `__syncthreads()` 来同步，从而可以协作完成任务。
 
-同一个 warp 上的 32 个线程通过 SIMT 方式执行任务，也就是说，一条指令会被同时发送到 warp 中的所有 thread 执行，因此这些 thread 之间是必然同步的。当因为存在条件判断导致同 warp 内的 thread 执行的指令不一样时，warp 调度器会分成两个 pass 来执行指令，第一个 pass 执行 if 条件语句，不满足 if 条件的 thread 将不起作用
+同一个 warp 上的 32 个线程通过 SIMT 方式执行任务，也就是说，一条指令会被同时发送到 warp 中的所有 thread 执行，因此这些 thread 之间是必然同步的。当因为存在条件判断导致同 warp 内的 thread 执行的指令不一样时，warp 调度器会分成两个 pass 来执行指令，第一个 pass 执行 if 条件语句，不满足 if 条件的 thread 将不起作用。
 
 ## 参考
 
